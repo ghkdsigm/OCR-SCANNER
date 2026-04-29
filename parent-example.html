@@ -193,7 +193,8 @@
     </div>
 
     <script>
-      const OCR_ORIGIN = 'http://localhost:3339'
+      const params = new URLSearchParams(window.location.search)
+      const OCR_ORIGIN = params.get('ocrOrigin') || 'http://localhost:3339'
 
       // postMessage 수신
       window.addEventListener('message', (event) => {

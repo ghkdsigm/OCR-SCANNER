@@ -68,10 +68,14 @@ function computeGuide() {
   const containerH = el.offsetHeight
 
   const PADDING_H = 24
-  const guideW = containerW - PADDING_H * 2
-  // 자동차등록증 비율 약 1.42:1 (A4 가로)
-  const guideH = Math.round(guideW / 1.42)
-  const guideX = PADDING_H
+  const TOP_PADDING = 32
+  const BOTTOM_SAFE_AREA = 180
+  // 세로 문서 비율(가로:세로 ~= 1:1.42)에 맞춰 가이드를 계산한다.
+  const maxGuideW = containerW - PADDING_H * 2
+  const maxGuideH = containerH - TOP_PADDING - BOTTOM_SAFE_AREA
+  const guideH = Math.min(maxGuideH, Math.round(maxGuideW * 1.42))
+  const guideW = Math.round(guideH / 1.42)
+  const guideX = Math.round((containerW - guideW) / 2)
   const guideY = Math.round((containerH - guideH) / 2)
 
   guide.value = { x: guideX, y: guideY, width: guideW, height: guideH }

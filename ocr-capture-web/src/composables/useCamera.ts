@@ -14,8 +14,8 @@ export function useCamera() {
       stream.value = await navigator.mediaDevices.getUserMedia({
         video: {
           facingMode: 'environment',
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
+          width: { ideal: 1920 },
+          height: { ideal: 1080 },
         },
         audio: false,
       })
@@ -57,30 +57,33 @@ export function useCamera() {
       const video = videoRef.value
       if (!video || !isReady.value) return resolve(null)
 
+      const scaleX = video.videoWidth / video.offsetWidth
+      const scaleY = video.videoHeight / video.offsetHeight
+      const sourceX = Math.round(guideRect.x * scaleX)
+      const sourceY = Math.round(guideRect.y * scaleY)
+      const sourceWidth = Math.round(guideRect.width * scaleX)
+      const sourceHeight = Math.round(guideRect.height * scaleY)
+
       const canvas = document.createElement('canvas')
-      canvas.width = guideRect.width
-      canvas.height = guideRect.height
+      canvas.width = sourceWidth
+      canvas.height = sourceHeight
 
       const ctx = canvas.getContext('2d')
       if (!ctx) return resolve(null)
 
-      // video 실제 해상도 vs 표시 크기 비율
-      const scaleX = video.videoWidth / video.offsetWidth
-      const scaleY = video.videoHeight / video.offsetHeight
-
       ctx.drawImage(
         video,
-        guideRect.x * scaleX,
-        guideRect.y * scaleY,
-        guideRect.width * scaleX,
-        guideRect.height * scaleY,
+        sourceX,
+        sourceY,
+        sourceWidth,
+        sourceHeight,
         0,
         0,
-        guideRect.width,
-        guideRect.height,
+        sourceWidth,
+        sourceHeight,
       )
 
-      canvas.toBlob(resolve, 'image/jpeg', 0.92)
+      canvas.toBlob(resolve, 'image/jpeg', 0.98)
     })
   }
 
