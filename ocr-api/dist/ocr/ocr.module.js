@@ -11,6 +11,8 @@ const common_1 = require("@nestjs/common");
 const ocr_controller_1 = require("./ocr.controller");
 const ocr_service_1 = require("./ocr.service");
 const tesseract_ocr_provider_1 = require("./providers/tesseract-ocr.provider");
+const google_vision_ocr_provider_1 = require("./providers/google-vision-ocr.provider");
+const ip_rate_limiter_service_1 = require("./services/ip-rate-limiter.service");
 const ocr_provider_interface_1 = require("./providers/ocr-provider.interface");
 let OcrModule = class OcrModule {
 };
@@ -24,6 +26,8 @@ exports.OcrModule = OcrModule = __decorate([
                 provide: ocr_provider_interface_1.OCR_PROVIDER,
                 useClass: tesseract_ocr_provider_1.TesseractOcrProvider,
             },
+            google_vision_ocr_provider_1.GoogleVisionOcrProvider,
+            ip_rate_limiter_service_1.IpRateLimiterService,
         ],
     })
 ], OcrModule);

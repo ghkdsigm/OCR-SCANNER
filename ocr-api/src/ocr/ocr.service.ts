@@ -1,7 +1,9 @@
-import { Inject, Injectable, BadRequestException } from '@nestjs/common'
+import { Inject, Injectable, BadRequestException, Logger } from '@nestjs/common'
 import { OCR_PROVIDER } from './providers/ocr-provider.interface'
 import type { OcrProvider } from './providers/ocr-provider.interface'
 import type { OcrResultDto } from './dto/ocr-result.dto'
+import { GoogleVisionOcrProvider } from './providers/google-vision-ocr.provider'
+import { IpRateLimiterService } from './services/ip-rate-limiter.service'
 
 const ALLOWED_MIME_TYPES = [
   'image/jpeg',
@@ -15,7 +17,13 @@ const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024 // 10 MB
 
 @Injectable()
 export class OcrService {
-  constructor(@Inject(OCR_PROVIDER) private readonly ocrProvider: OcrProvider) {}
+  private readonly logger = new Logger(OcrService.name)
+
+  constructor(
+    @Inject(OCR_PROVIDER) private readonly ocrProvider: OcrProvider,
+    private readonly googleVisionProvider: GoogleVisionOcrProvider,
+    private readonly ipRateLimiter: IpRateLimiterService,
+  ) {}
 
   async analyzeVehicleRegistration(
     file: Express.Multer.File,
@@ -30,6 +38,35 @@ export class OcrService {
       mappedData,
       confidence: 0.92,
       status: 'COMPLETED',
+      provider: 'default',
+    }
+  }
+
+  async requeryVehicleRegistration(
+    file: Express.Multer.File,
+    receiptId: string,
+    ip: string,
+  ): Promise<OcrResultDto> {
+    this.validateFile(file)
+
+    const usage = this.ipRateLimiter.registerRequeryAttempt(ip)
+    const shouldUseGoogleVision = usage.useGoogleVision && file.mimetype !== 'application/pdf'
+    const provider: OcrResultDto['provider'] = shouldUseGoogleVision ? 'google-vision' : 'default'
+
+    this.logger.log(
+      `재조회 요청 - ip=${ip}, requeryAttempt=${usage.requeryAttemptNumber}, provider=${provider}`,
+    )
+
+    const mappedData = shouldUseGoogleVision
+      ? await this.googleVisionProvider.analyzeVehicleRegistration(file)
+      : await this.ocrProvider.analyzeVehicleRegistration(file)
+
+    return {
+      receiptId,
+      mappedData,
+      confidence: 0.92,
+      status: 'COMPLETED',
+      provider,
     }
   }
 

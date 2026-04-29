@@ -1,7 +1,21 @@
 <template>
   <div class="flex flex-col h-full bg-gray-950 text-white">
+
+    <!-- ── OCR 결과 화면 ── -->
+    <OcrResultPanel
+      v-if="state === 'result' && editableMappedData"
+      :data="editableMappedData"
+      :is-loading="isUploading"
+      :is-saving="isSaving"
+      :is-saved="hasSaved"
+      @update:data="onDataUpdated"
+      @requery="onRequery"
+      @save="onSave"
+      @payment="onPayment"
+    />
+
     <!-- ── 파일 선택 단계 ── -->
-    <template v-if="state === 'idle'">
+    <template v-else-if="state === 'idle'">
       <div class="flex-1 flex flex-col items-center justify-center p-8 gap-6">
         <div class="w-20 h-20 rounded-full bg-gray-800 flex items-center justify-center">
           <svg class="w-10 h-10 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -22,7 +36,6 @@
         </button>
       </div>
 
-      <!-- 숨김 파일 input -->
       <input
         ref="fileInputRef"
         type="file"
@@ -35,14 +48,12 @@
     <!-- ── 파일 미리보기 단계 ── -->
     <template v-else-if="state === 'preview'">
       <div class="flex-1 flex items-center justify-center p-4 overflow-hidden">
-        <!-- 이미지 미리보기 -->
         <img
           v-if="previewSrc && !isPdf"
           :src="previewSrc"
           alt="첨부 파일 미리보기"
           class="max-w-full max-h-full object-contain rounded-lg"
         />
-        <!-- PDF 아이콘 -->
         <div v-else class="flex flex-col items-center gap-4">
           <svg class="w-20 h-20 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
@@ -86,14 +97,14 @@
       </button>
     </div>
 
-    <!-- ── 로딩 오버레이 ── -->
+    <!-- ── 로딩 오버레이 (초기 분석) ── -->
     <LoadingOverlay v-if="state === 'uploading'" message="OCR 분석 중…" />
 
-    <!-- ── 에러 토스트 ── -->
+    <!-- ── 토스트 ── -->
     <Transition name="fade">
       <div
         v-if="toastMessage"
-        class="absolute bottom-8 inset-x-4 bg-red-500/90 text-white text-sm text-center py-3 px-4 rounded-xl"
+        class="absolute bottom-8 inset-x-4 bg-red-500/90 text-white text-sm text-center py-3 px-4 rounded-xl z-50"
       >
         {{ toastMessage }}
       </div>
@@ -105,14 +116,15 @@
 import { ref } from 'vue'
 import { v4 as uuidv4 } from 'uuid'
 import LoadingOverlay from '@/components/LoadingOverlay.vue'
+import OcrResultPanel from '@/components/OcrResultPanel.vue'
 import { useOcr } from '@/composables/useOcr'
 import { usePostMessage } from '@/composables/usePostMessage'
-import type { CaptureState } from '@/types/ocr'
+import type { CaptureState, OcrResponse, VehicleRegistrationData } from '@/types/ocr'
 
 const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf']
 const MAX_SIZE_BYTES = 10 * 1024 * 1024
 
-const { analyzeImage } = useOcr()
+const { isUploading, isSaving, analyzeImage, requeryImage, saveResult } = useOcr()
 const { sendOcrCompleted, sendOcrFailed } = usePostMessage()
 
 const fileInputRef = ref<HTMLInputElement | null>(null)
@@ -123,6 +135,10 @@ const selectedFileName = ref('')
 const isPdf = ref(false)
 const errorMessage = ref('')
 const toastMessage = ref('')
+const ocrResult = ref<OcrResponse | null>(null)
+const editableMappedData = ref<VehicleRegistrationData | null>(null)
+const receiptId = ref('')
+const hasSaved = ref(false)
 let toastTimer: ReturnType<typeof setTimeout> | null = null
 
 function triggerFileInput() {
@@ -134,7 +150,6 @@ function onFileSelected(event: Event) {
   const file = input.files?.[0]
   if (!file) return
 
-  // 파일 초기화 (같은 파일 재선택 허용)
   input.value = ''
 
   if (!ALLOWED_TYPES.includes(file.type)) {
@@ -171,38 +186,93 @@ function onReselect() {
   selectedFile.value = null
   selectedFileName.value = ''
   isPdf.value = false
+  ocrResult.value = null
+  editableMappedData.value = null
+  receiptId.value = ''
+  hasSaved.value = false
   state.value = 'idle'
 }
 
 async function onConfirm() {
   if (!selectedFile.value) return
 
-  const receiptId = uuidv4()
+  receiptId.value = uuidv4()
+  hasSaved.value = false
   state.value = 'uploading'
 
   try {
-    const result = await analyzeImage(selectedFile.value, receiptId)
+    const result = await analyzeImage(selectedFile.value, receiptId.value)
 
     if (result.status !== 'COMPLETED') {
       throw new Error('OCR 분석이 완료되지 않았습니다.')
     }
 
-    sendOcrCompleted(result.receiptId, result.mappedData)
-    state.value = 'done'
+    ocrResult.value = result
+    editableMappedData.value = { ...result.mappedData }
+    state.value = 'result'
   } catch (err) {
     const message = err instanceof Error ? err.message : 'OCR 분석 중 오류가 발생했습니다.'
-    sendOcrFailed(receiptId)
+    sendOcrFailed(receiptId.value)
     showToast(message)
     state.value = 'preview'
   }
 }
 
+async function onRequery() {
+  if (!selectedFile.value || !receiptId.value || hasSaved.value) return
+
+  try {
+    const result = await requeryImage(selectedFile.value, receiptId.value)
+
+    if (result.status !== 'COMPLETED') {
+      throw new Error('재분석이 완료되지 않았습니다.')
+    }
+
+    ocrResult.value = result
+    editableMappedData.value = { ...result.mappedData }
+    hasSaved.value = false
+  } catch (err) {
+    const message = err instanceof Error ? err.message : '재분석 중 오류가 발생했습니다.'
+    showToast(message)
+  }
+}
+
+async function onSave() {
+  if (!ocrResult.value || !editableMappedData.value || hasSaved.value) return
+
+  try {
+    await saveResult({
+      ...ocrResult.value,
+      mappedData: editableMappedData.value,
+    })
+    sendOcrCompleted(ocrResult.value.receiptId, editableMappedData.value)
+    hasSaved.value = true
+    showToastSuccess('사전접수가 완료되었습니다.')
+    state.value = 'result'
+  } catch (err) {
+    const message = err instanceof Error ? err.message : '저장 중 오류가 발생했습니다.'
+    showToast(message)
+  }
+}
+
+function onPayment() {
+  showToast('성능비 결재 기능은 준비 중입니다.')
+}
+
+function onDataUpdated(value: VehicleRegistrationData) {
+  editableMappedData.value = value
+}
+
 function showToast(message: string) {
   toastMessage.value = message
   if (toastTimer) clearTimeout(toastTimer)
-  toastTimer = setTimeout(() => {
-    toastMessage.value = ''
-  }, 3500)
+  toastTimer = setTimeout(() => { toastMessage.value = '' }, 3500)
+}
+
+function showToastSuccess(message: string) {
+  toastMessage.value = message
+  if (toastTimer) clearTimeout(toastTimer)
+  toastTimer = setTimeout(() => { toastMessage.value = '' }, 2500)
 }
 </script>
 

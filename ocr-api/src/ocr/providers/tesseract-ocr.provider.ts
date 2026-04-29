@@ -3,11 +3,10 @@ import { createWorker, OEM, PSM } from 'tesseract.js'
 import type { Worker } from 'tesseract.js'
 import * as sharp from 'sharp'
 import type { OcrProvider, VehicleRegistrationOcrResult } from './ocr-provider.interface'
+import { VehicleRegistrationTextParser } from '../parsers/vehicle-registration-text.parser'
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const pdfParse = require('pdf-parse')
-
-/** | (U+007C) 와 ｜ (U+FF5C 전각 파이프) 양쪽 모두 구분자로 허용 */
 const SEP = '[|｜:：]'
 
 @Injectable()
@@ -78,7 +77,7 @@ export class TesseractOcrProvider implements OcrProvider, OnModuleInit, OnModule
     this.logger.debug(`[Pass1 전체]\n${fullText}`)
     this.logger.debug(`[Pass8 하단]\n${lowerText}`)
 
-    return this.parse(combined)
+    return VehicleRegistrationTextParser.parse(combined)
   }
 
   private async ocrFirstRegistrationRegion(buffer: Buffer, w: number, h: number): Promise<string> {
@@ -262,13 +261,13 @@ export class TesseractOcrProvider implements OcrProvider, OnModuleInit, OnModule
       const data = await pdfParse(file.buffer)
       if ((data?.text ?? '').trim().length > 30) {
         this.logger.debug('텍스트 기반 PDF: 직접 파싱')
-        return this.parse(data.text)
+        return VehicleRegistrationTextParser.parse(data.text)
       }
     } catch (err) {
       this.logger.warn(`pdf-parse 실패: ${(err as Error).message}`)
     }
     this.logger.warn('이미지 전용 PDF는 처리 불가 — 이미지로 재업로드 필요')
-    return this.empty()
+    return VehicleRegistrationTextParser.empty()
   }
 
   // ── 파싱 ─────────────────────────────────────────────────────────

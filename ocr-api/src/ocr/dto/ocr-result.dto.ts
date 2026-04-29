@@ -5,4 +5,5 @@ export class OcrResultDto {
   mappedData: VehicleRegistrationOcrResult
   confidence: number
   status: 'COMPLETED' | 'FAILED'
+  provider: 'default' | 'google-vision'
 }

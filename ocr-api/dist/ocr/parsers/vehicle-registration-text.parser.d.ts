@@ -1,0 +1,32 @@
+import type { VehicleRegistrationOcrResult } from '../providers/ocr-provider.interface';
+export declare class VehicleRegistrationTextParser {
+    static parse(text: string): VehicleRegistrationOcrResult;
+    static empty(): VehicleRegistrationOcrResult;
+    private static normalizeOcrText;
+    private static extractCarNumber;
+    private static extractCarType;
+    private static normalizeCarTypeValue;
+    private static extractPurpose;
+    private static extractCarName;
+    private static isLikelyCarName;
+    private static cleanCarName;
+    private static extractModelInfo;
+    private static extractModelCode;
+    private static extractYearMonth;
+    private static extractEngineType;
+    private static extractVin;
+    private static extractDisplacement;
+    private static extractPassengerCapacity;
+    private static extractMaxLoad;
+    private static extractFuelType;
+    private static extractLocation;
+    private static isLikelyLocation;
+    private static cleanLocation;
+    private static extractOwnerName;
+    private static extractFirstDate;
+    private static extractInspectionValidity;
+    private static normalizeDateString;
+    private static getLabelWindow;
+    private static extractInlineValue;
+    private static isLikelyLabel;
+}

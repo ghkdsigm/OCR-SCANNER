@@ -18,6 +18,18 @@
       </button>
     </div>
 
+    <OcrResultPanel
+      v-else-if="state === 'result' && editableMappedData"
+      :data="editableMappedData"
+      :is-loading="isUploading"
+      :is-saving="isSaving"
+      :is-saved="hasSaved"
+      @update:data="onDataUpdated"
+      @requery="onRequery"
+      @save="onSave"
+      @payment="onPayment"
+    />
+
     <!-- ── 프리뷰(미리보기) 단계 ── -->
     <ImagePreview
       v-else-if="state === 'preview' && capturedImageSrc"
@@ -73,13 +85,14 @@ import { v4 as uuidv4 } from 'uuid'
 import GuideFrame from '@/components/GuideFrame.vue'
 import ImagePreview from '@/components/ImagePreview.vue'
 import LoadingOverlay from '@/components/LoadingOverlay.vue'
+import OcrResultPanel from '@/components/OcrResultPanel.vue'
 import { useCamera } from '@/composables/useCamera'
 import { useOcr } from '@/composables/useOcr'
 import { usePostMessage } from '@/composables/usePostMessage'
-import type { CaptureState } from '@/types/ocr'
+import type { CaptureState, OcrResponse, VehicleRegistrationData } from '@/types/ocr'
 
 const { videoRef, isReady, cameraError, startCamera, captureFrame } = useCamera()
-const { isUploading, analyzeImage } = useOcr()
+const { isUploading, isSaving, analyzeImage, requeryImage, saveResult } = useOcr()
 const { sendOcrCompleted, sendOcrFailed } = usePostMessage()
 
 const state = ref<CaptureState>('idle')
@@ -88,6 +101,10 @@ const capturedBlob = ref<Blob | null>(null)
 const capturedImageSrc = ref<string | null>(null)
 const errorMessage = ref('')
 const toastMessage = ref('')
+const ocrResult = ref<OcrResponse | null>(null)
+const editableMappedData = ref<VehicleRegistrationData | null>(null)
+const receiptId = ref('')
+const hasSaved = ref(false)
 let toastTimer: ReturnType<typeof setTimeout> | null = null
 
 async function initCamera() {
@@ -118,30 +135,81 @@ function onRetake() {
     capturedImageSrc.value = null
   }
   capturedBlob.value = null
+  ocrResult.value = null
+  editableMappedData.value = null
+  receiptId.value = ''
+  hasSaved.value = false
   state.value = 'capturing'
 }
 
 async function onConfirmCapture() {
   if (!capturedBlob.value) return
 
-  const receiptId = uuidv4()
+  receiptId.value = uuidv4()
+  hasSaved.value = false
   state.value = 'uploading'
 
   try {
-    const result = await analyzeImage(capturedBlob.value, receiptId)
+    const result = await analyzeImage(capturedBlob.value, receiptId.value)
 
     if (result.status !== 'COMPLETED') {
       throw new Error('OCR 분석이 완료되지 않았습니다.')
     }
 
-    sendOcrCompleted(result.receiptId, result.mappedData)
-    state.value = 'done'
+    ocrResult.value = result
+    editableMappedData.value = { ...result.mappedData }
+    state.value = 'result'
   } catch (err) {
     const message = err instanceof Error ? err.message : 'OCR 분석 중 오류가 발생했습니다.'
-    sendOcrFailed(receiptId)
+    sendOcrFailed(receiptId.value)
     showToast(message)
     state.value = 'preview'
   }
+}
+
+async function onRequery() {
+  if (!capturedBlob.value || !receiptId.value || hasSaved.value) return
+
+  try {
+    const result = await requeryImage(capturedBlob.value, receiptId.value)
+
+    if (result.status !== 'COMPLETED') {
+      throw new Error('재분석이 완료되지 않았습니다.')
+    }
+
+    ocrResult.value = result
+    editableMappedData.value = { ...result.mappedData }
+    hasSaved.value = false
+  } catch (err) {
+    const message = err instanceof Error ? err.message : '재분석 중 오류가 발생했습니다.'
+    showToast(message)
+  }
+}
+
+async function onSave() {
+  if (!ocrResult.value || !editableMappedData.value || hasSaved.value) return
+
+  try {
+    await saveResult({
+      ...ocrResult.value,
+      mappedData: editableMappedData.value,
+    })
+    sendOcrCompleted(ocrResult.value.receiptId, editableMappedData.value)
+    hasSaved.value = true
+    showToast('사전접수가 완료되었습니다.')
+    state.value = 'result'
+  } catch (err) {
+    const message = err instanceof Error ? err.message : '저장 중 오류가 발생했습니다.'
+    showToast(message)
+  }
+}
+
+function onPayment() {
+  showToast('성능비 결재 기능은 준비 중입니다.')
+}
+
+function onDataUpdated(value: VehicleRegistrationData) {
+  editableMappedData.value = value
 }
 
 function showToast(message: string) {

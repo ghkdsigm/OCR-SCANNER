@@ -2,12 +2,22 @@ import { ref } from 'vue'
 import type { OcrResponse } from '@/types/ocr'
 
 const OCR_API_URL = import.meta.env.VITE_OCR_API_URL as string
+const EXTERNAL_API_URL = import.meta.env.VITE_EXTERNAL_API_URL as string
 
 export function useOcr() {
   const isUploading = ref(false)
+  const isSaving = ref(false)
   const ocrError = ref<string | null>(null)
 
   async function analyzeImage(imageBlob: Blob, receiptId: string): Promise<OcrResponse> {
+    return _callOcr(`${OCR_API_URL}/ocr/vehicle-registration/analyze`, imageBlob, receiptId)
+  }
+
+  async function requeryImage(imageBlob: Blob, receiptId: string): Promise<OcrResponse> {
+    return _callOcr(`${OCR_API_URL}/ocr/vehicle-registration/requery`, imageBlob, receiptId)
+  }
+
+  async function _callOcr(url: string, imageBlob: Blob, receiptId: string): Promise<OcrResponse> {
     isUploading.value = true
     ocrError.value = null
 
@@ -16,7 +26,7 @@ export function useOcr() {
       formData.append('image', imageBlob, 'vehicle-registration.jpg')
       formData.append('receiptId', receiptId)
 
-      const response = await fetch(`${OCR_API_URL}/ocr/vehicle-registration/analyze`, {
+      const response = await fetch(url, {
         method: 'POST',
         body: formData,
       })
@@ -37,5 +47,29 @@ export function useOcr() {
     }
   }
 
-  return { isUploading, ocrError, analyzeImage }
+  async function saveResult(result: OcrResponse): Promise<void> {
+    isSaving.value = true
+
+    try {
+      const response = await fetch(`${EXTERNAL_API_URL}/external/ocr-result`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          receiptId: result.receiptId,
+          mappedData: result.mappedData,
+          confidence: result.confidence,
+          status: result.status,
+        }),
+      })
+
+      if (!response.ok) {
+        const errorBody = await response.text()
+        throw new Error(`저장 실패 (${response.status}): ${errorBody}`)
+      }
+    } finally {
+      isSaving.value = false
+    }
+  }
+
+  return { isUploading, isSaving, ocrError, analyzeImage, requeryImage, saveResult }
 }

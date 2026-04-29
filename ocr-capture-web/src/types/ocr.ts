@@ -21,6 +21,7 @@ export interface OcrResponse {
   mappedData: VehicleRegistrationData
   confidence: number
   status: 'COMPLETED' | 'FAILED'
+  provider: 'default' | 'google-vision'
 }
 
 export interface PostMessagePayload {
@@ -29,6 +30,6 @@ export interface PostMessagePayload {
   payload: VehicleRegistrationData | null
 }
 
-export type CaptureState = 'idle' | 'capturing' | 'preview' | 'uploading' | 'done' | 'error'
+export type CaptureState = 'idle' | 'capturing' | 'preview' | 'uploading' | 'result' | 'done' | 'error'
 
 export type OcrMode = 'camera' | 'upload'

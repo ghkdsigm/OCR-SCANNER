@@ -11,6 +11,7 @@ exports.TesseractOcrProvider = void 0;
 const common_1 = require("@nestjs/common");
 const tesseract_js_1 = require("tesseract.js");
 const sharp = require("sharp");
+const vehicle_registration_text_parser_1 = require("../parsers/vehicle-registration-text.parser");
 const pdfParse = require('pdf-parse');
 const SEP = '[|｜:：]';
 let TesseractOcrProvider = TesseractOcrProvider_1 = class TesseractOcrProvider {
@@ -66,7 +67,7 @@ let TesseractOcrProvider = TesseractOcrProvider_1 = class TesseractOcrProvider {
         this.logger.debug(`[Pass7 검사표]\n${inspectionText}`);
         this.logger.debug(`[Pass1 전체]\n${fullText}`);
         this.logger.debug(`[Pass8 하단]\n${lowerText}`);
-        return this.parse(combined);
+        return vehicle_registration_text_parser_1.VehicleRegistrationTextParser.parse(combined);
     }
     async ocrFirstRegistrationRegion(buffer, w, h) {
         return this.ocrRegion('최초등록일', buffer, {
@@ -195,14 +196,14 @@ let TesseractOcrProvider = TesseractOcrProvider_1 = class TesseractOcrProvider {
             const data = await pdfParse(file.buffer);
             if ((data?.text ?? '').trim().length > 30) {
                 this.logger.debug('텍스트 기반 PDF: 직접 파싱');
-                return this.parse(data.text);
+                return vehicle_registration_text_parser_1.VehicleRegistrationTextParser.parse(data.text);
             }
         }
         catch (err) {
             this.logger.warn(`pdf-parse 실패: ${err.message}`);
         }
         this.logger.warn('이미지 전용 PDF는 처리 불가 — 이미지로 재업로드 필요');
-        return this.empty();
+        return vehicle_registration_text_parser_1.VehicleRegistrationTextParser.empty();
     }
     parse(text) {
         const normalizedText = this.normalizeOcrText(text);
@@ -357,8 +358,8 @@ let TesseractOcrProvider = TesseractOcrProvider_1 = class TesseractOcrProvider {
                 continue;
             const candidate = line
                 .replace(/^.*[©@]?\s*차(?:\s*명)?\s*[|｜:：]?\s*/u, '')
-                .replace(/\s+[<©@].*$/, '')
-                .replace(/\s+(?:형\s*식|모델\s*연\s*도|차\s*대\s*번\s*호|원\s*동\s*기\s*형\s*식).*$/u, '')
+                .replace(/\s+[<©@&].*$/, '')
+                .replace(/\s+(?:[<©@&]\s*)?(?:형\s*식|형\s*식\s*및\s*모델\s*연\s*도|모델\s*연\s*도|차\s*대\s*번\s*호|원\s*동\s*기\s*형\s*식).*$/u, '')
                 .replace(/\s*<\s*$/, '')
                 .trim();
             if (candidate)
@@ -368,8 +369,8 @@ let TesseractOcrProvider = TesseractOcrProvider_1 = class TesseractOcrProvider {
         if (m) {
             return m[1]
                 .trim()
-                .replace(/\s+[<©@].*$/, '')
-                .replace(/\s+(?:형\s*식|모델\s*연\s*도|차\s*대\s*번\s*호|원\s*동\s*기\s*형\s*식).*$/u, '')
+                .replace(/\s+[<©@&].*$/, '')
+                .replace(/\s+(?:[<©@&]\s*)?(?:형\s*식|형\s*식\s*및\s*모델\s*연\s*도|모델\s*연\s*도|차\s*대\s*번\s*호|원\s*동\s*기\s*형\s*식).*$/u, '')
                 .replace(/\s*<\s*$/, '')
                 .replace(/\s{3,}.*$/, '')
                 .trim();
