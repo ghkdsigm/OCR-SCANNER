@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//c/Users/hwangseunghyun/.claude/projects/C--workspace-ocr-scanner/memory//**)",
+      "Read(//c/Users/hwangseunghyun/.claude/projects/C--workspace-ocr-scanner/memory/**)",
+      "Bash(npm install *)",
+      "Bash(npx tsc *)",
+      "Bash(npm run *)",
+      "Bash(echo \"PID: $!\")",
+      "Bash(node *)",
+      "Bash(curl *)",
+      "PowerShell(netstat *)",
+      "Bash(netstat -ano)",
+      "Bash(taskkill /PID 33024 /F)",
+      "PowerShell(Stop-Process *)",
+      "Bash(echo \"Server starting in background, PID=$!\")",
+      "PowerShell(Get-NetTCPConnection *)"
+    ]
+  }
+}
