@@ -10,8 +10,13 @@ export declare class VehicleRegistrationTextParser {
     private static extractCarName;
     private static isLikelyCarName;
     private static cleanCarName;
+    private static extractCarNameNearModelInfo;
+    private static isLikelyCarNameFallback;
+    private static pickBestCarName;
+    private static carNameScore;
     private static extractModelInfo;
     private static extractModelCode;
+    private static modelInfoScore;
     private static extractYearMonth;
     private static extractEngineType;
     private static extractVin;
@@ -28,5 +33,10 @@ export declare class VehicleRegistrationTextParser {
     private static normalizeDateString;
     private static getLabelWindow;
     private static extractInlineValue;
+    private static compactForMatching;
+    private static joinFragmentedText;
+    private static isLikelyEngineType;
+    private static pickBestEngineType;
+    private static engineTypeScore;
     private static isLikelyLabel;
 }

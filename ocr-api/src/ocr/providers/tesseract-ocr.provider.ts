@@ -54,28 +54,52 @@ export class TesseractOcrProvider implements OcrProvider, OnModuleInit, OnModule
     await this.setPsm(PSM.AUTO)
     const fullText = await this.runOcr(fullBuf)
 
-    // ── Pass 2~4: 영역별 보강 OCR ──────────────────────────────
+    // ── Pass 2~11: 영역별 보강 OCR ─────────────────────────────
     const firstRegistrationText = await this.ocrFirstRegistrationRegion(file.buffer, w, h)
     const purposeText = await this.ocrPurposeRegion(file.buffer, w, h)
     const vinText = await this.ocrVinRegion(file.buffer, w, h)
+    const carNameText = await this.ocrCarNameRegion(file.buffer, w, h)
+    const modelInfoText = await this.ocrModelInfoRegion(file.buffer, w, h)
+    const engineTypeText = await this.ocrEngineTypeRegion(file.buffer, w, h)
+    const locationText = await this.ocrLocationRegion(file.buffer, w, h)
     const upperSummaryText = await this.ocrUpperSummaryRegion(file.buffer, w, h)
     const specsText = await this.ocrSpecsRegion(file.buffer, w, h)
     const inspectionText = await this.ocrInspectionRegion(file.buffer, w, h)
+    const fullBinaryText = await this.ocrFullBinaryRegion(file.buffer)
 
-    // ── Pass 5: 하단 전체 영역(60%~) 2x 업스케일 + SPARSE_TEXT ─
+    // ── Pass 12: 하단 전체 영역(60%~) 2x 업스케일 + SPARSE_TEXT ─
     const lowerText = await this.ocrLowerRegion(file.buffer, w, h)
 
-    const combined = [firstRegistrationText, purposeText, vinText, upperSummaryText, specsText, inspectionText, fullText, lowerText]
+    const combined = [
+      firstRegistrationText,
+      purposeText,
+      vinText,
+      carNameText,
+      modelInfoText,
+      engineTypeText,
+      locationText,
+      upperSummaryText,
+      specsText,
+      inspectionText,
+      fullText,
+      fullBinaryText,
+      lowerText,
+    ]
       .filter(Boolean)
       .join('\n\n')
     this.logger.debug(`[Pass2 최초등록일]\n${firstRegistrationText}`)
     this.logger.debug(`[Pass3 용도]\n${purposeText}`)
     this.logger.debug(`[Pass4 차대번호]\n${vinText}`)
-    this.logger.debug(`[Pass5 상단 우측]\n${upperSummaryText}`)
-    this.logger.debug(`[Pass6 제원표]\n${specsText}`)
-    this.logger.debug(`[Pass7 검사표]\n${inspectionText}`)
+    this.logger.debug(`[Pass5 차명]\n${carNameText}`)
+    this.logger.debug(`[Pass6 형식/모델연도]\n${modelInfoText}`)
+    this.logger.debug(`[Pass7 원동기형식]\n${engineTypeText}`)
+    this.logger.debug(`[Pass8 사용본거지]\n${locationText}`)
+    this.logger.debug(`[Pass9 상단 우측]\n${upperSummaryText}`)
+    this.logger.debug(`[Pass10 제원표]\n${specsText}`)
+    this.logger.debug(`[Pass11 검사표]\n${inspectionText}`)
     this.logger.debug(`[Pass1 전체]\n${fullText}`)
-    this.logger.debug(`[Pass8 하단]\n${lowerText}`)
+    this.logger.debug(`[Pass12 전체 이진화]\n${fullBinaryText}`)
+    this.logger.debug(`[Pass13 하단]\n${lowerText}`)
 
     return VehicleRegistrationTextParser.parse(combined)
   }
@@ -111,28 +135,80 @@ export class TesseractOcrProvider implements OcrProvider, OnModuleInit, OnModule
   }
 
   private async ocrVinRegion(buffer: Buffer, w: number, h: number): Promise<string> {
-    await this.worker?.setParameters({
-      tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789',
-    })
-  
-    try {
-      return await this.ocrRegion(
-        '차대번호',
-        buffer,
-        {
-          left: Math.floor(w * 0.03),
-          top: Math.floor(h * 0.14),
-          width: Math.floor(w * 0.56),
-          height: Math.floor(h * 0.07),
-        },
-        PSM.SINGLE_LINE,
-        4.0,
-      )
-    } finally {
-      await this.worker?.setParameters({
-        tessedit_char_whitelist: '',
-      })
-    }
+    return this.ocrAlphaNumericRegion(
+      '차대번호',
+      buffer,
+      {
+        left: Math.floor(w * 0.03),
+        top: Math.floor(h * 0.14),
+        width: Math.floor(w * 0.56),
+        height: Math.floor(h * 0.07),
+      },
+      PSM.SINGLE_LINE,
+      4.2,
+      'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789',
+    )
+  }
+
+  private async ocrCarNameRegion(buffer: Buffer, w: number, h: number): Promise<string> {
+    return this.ocrRegionWithVariants(
+      '차명',
+      buffer,
+      {
+        left: Math.floor(w * 0.03),
+        top: Math.floor(h * 0.10),
+        width: Math.floor(w * 0.46),
+        height: Math.floor(h * 0.08),
+      },
+      PSM.SINGLE_BLOCK,
+      4.6,
+    )
+  }
+
+  private async ocrModelInfoRegion(buffer: Buffer, w: number, h: number): Promise<string> {
+    return this.ocrRegionWithVariants(
+      '형식/모델연도',
+      buffer,
+      {
+        left: Math.floor(w * 0.48),
+        top: Math.floor(h * 0.10),
+        width: Math.floor(w * 0.34),
+        height: Math.floor(h * 0.10),
+      },
+      PSM.SINGLE_BLOCK,
+      5.0,
+    )
+  }
+
+  private async ocrEngineTypeRegion(buffer: Buffer, w: number, h: number): Promise<string> {
+    return this.ocrAlphaNumericRegion(
+      '원동기형식',
+      buffer,
+      {
+        left: Math.floor(w * 0.48),
+        top: Math.floor(h * 0.15),
+        width: Math.floor(w * 0.18),
+        height: Math.floor(h * 0.07),
+      },
+      PSM.SINGLE_BLOCK,
+      5.4,
+      'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-',
+    )
+  }
+
+  private async ocrLocationRegion(buffer: Buffer, w: number, h: number): Promise<string> {
+    return this.ocrRegionWithVariants(
+      '사용본거지',
+      buffer,
+      {
+        left: Math.floor(w * 0.02),
+        top: Math.floor(h * 0.20),
+        width: Math.floor(w * 0.78),
+        height: Math.floor(h * 0.08),
+      },
+      PSM.SINGLE_BLOCK,
+      4.0,
+    )
   }
 
   private async ocrUpperSummaryRegion(buffer: Buffer, w: number, h: number): Promise<string> {
@@ -204,6 +280,18 @@ export class TesseractOcrProvider implements OcrProvider, OnModuleInit, OnModule
     }
   }
 
+  private async ocrFullBinaryRegion(buffer: Buffer): Promise<string> {
+    try {
+      const processed = await this.preprocess(buffer, { binary: true, sharpenSigma: 2.0, contrast: 1.18 })
+      await this.setPsm(PSM.AUTO)
+      return await this.runOcr(processed)
+    } catch (err) {
+      this.logger.warn(`전체 이진화 OCR 실패: ${(err as Error).message}`)
+      await this.setPsm(PSM.AUTO)
+      return ''
+    }
+  }
+
   private async ocrRegion(
     label: string,
     buffer: Buffer,
@@ -212,15 +300,7 @@ export class TesseractOcrProvider implements OcrProvider, OnModuleInit, OnModule
     scale = 2.0,
   ): Promise<string> {
     try {
-      const regionBuf = await sharp(buffer)
-        .extract(rect)
-        .resize({ width: Math.min(Math.round(rect.width * scale), 3200) })
-        .grayscale()
-        .normalize()
-        .threshold(160)
-        .sharpen({ sigma: 2.2 })
-        .toBuffer()
-
+      const regionBuf = await this.buildRegionBuffer(buffer, rect, scale)
       await this.setPsm(psm)
       const text = await this.runOcr(regionBuf)
       await this.setPsm(PSM.AUTO)
@@ -232,13 +312,110 @@ export class TesseractOcrProvider implements OcrProvider, OnModuleInit, OnModule
     }
   }
 
-  private async preprocess(buffer: Buffer): Promise<Buffer> {
+  private async ocrRegionWithVariants(
+    label: string,
+    buffer: Buffer,
+    rect: { left: number; top: number; width: number; height: number },
+    psm: PSM,
+    scale = 2.0,
+  ): Promise<string> {
     try {
-      return await sharp(buffer)
+      const variants = await Promise.all([
+        this.buildRegionBuffer(buffer, rect, scale, { binary: true, threshold: 160, sharpenSigma: 2.2, contrast: 1.08 }),
+        this.buildRegionBuffer(buffer, rect, scale, { binary: false, sharpenSigma: 1.8, contrast: 1.14 }),
+      ])
+
+      const results: string[] = []
+      for (const variant of variants) {
+        await this.setPsm(psm)
+        results.push(await this.runOcr(variant))
+      }
+      await this.setPsm(PSM.AUTO)
+
+      return results.filter(Boolean).join('\n')
+    } catch (err) {
+      this.logger.warn(`${label} 변형 OCR 실패: ${(err as Error).message}`)
+      await this.setPsm(PSM.AUTO)
+      return ''
+    }
+  }
+
+  private async ocrAlphaNumericRegion(
+    label: string,
+    buffer: Buffer,
+    rect: { left: number; top: number; width: number; height: number },
+    psm: PSM,
+    scale: number,
+    whitelist: string,
+  ): Promise<string> {
+    await this.worker?.setParameters({
+      tessedit_char_whitelist: whitelist,
+      preserve_interword_spaces: '1',
+    })
+
+    try {
+      return await this.ocrRegionWithVariants(label, buffer, rect, psm, scale)
+    } finally {
+      await this.worker?.setParameters({
+        tessedit_char_whitelist: '',
+        preserve_interword_spaces: '0',
+      })
+    }
+  }
+
+  private async buildRegionBuffer(
+    buffer: Buffer,
+    rect: { left: number; top: number; width: number; height: number },
+    scale: number,
+    options?: {
+      binary?: boolean
+      threshold?: number
+      sharpenSigma?: number
+      contrast?: number
+    },
+  ): Promise<Buffer> {
+    let pipeline = sharp(buffer)
+      .rotate()
+      .extract(rect)
+      .resize({ width: Math.min(Math.round(rect.width * scale), 3200) })
+      .grayscale()
+      .normalize()
+
+    if (options?.contrast) {
+      pipeline = pipeline.linear(options.contrast, -(options.contrast - 1) * 128)
+    }
+
+    if (options?.binary !== false) {
+      pipeline = pipeline.threshold(options?.threshold ?? 160)
+    }
+
+    return pipeline.sharpen({ sigma: options?.sharpenSigma ?? 2.2 }).toBuffer()
+  }
+
+  private async preprocess(
+    buffer: Buffer,
+    options?: {
+      binary?: boolean
+      threshold?: number
+      sharpenSigma?: number
+      contrast?: number
+    },
+  ): Promise<Buffer> {
+    try {
+      let pipeline = sharp(buffer)
+        .rotate()
         .grayscale()
         .normalize()
-        .sharpen({ sigma: 1.5 })
-        .toBuffer()
+
+      if (options?.contrast) {
+        pipeline = pipeline.linear(options.contrast, -(options.contrast - 1) * 128)
+      }
+
+      if (options?.binary) {
+        pipeline = pipeline.threshold(options.threshold ?? 165)
+      }
+
+      return await pipeline.sharpen({ sigma: options?.sharpenSigma ?? 1.5 }).toBuffer()
     } catch {
       return buffer
     }

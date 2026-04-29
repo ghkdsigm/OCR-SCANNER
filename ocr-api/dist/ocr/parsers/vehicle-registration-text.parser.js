@@ -52,6 +52,8 @@ class VehicleRegistrationTextParser {
             .replace(/[‘’`]/g, "'")
             .replace(/[·•]/g, ' ')
             .replace(/[①-⑳]/g, ' ')
+            .replace(/승룡/g, '승용')
+            .replace(/사가용/g, '자가용')
             .replace(/[ \t]+/g, ' ');
     }
     static extractCarNumber(text, lines) {
@@ -77,12 +79,21 @@ class VehicleRegistrationTextParser {
         return fallback ? `${fallback[1]}${fallback[2]}${fallback[3]}` : '';
     }
     static extractCarType(text) {
-        const spaced = text.match(/([경소중대]형)\s*(승용|승합)/);
-        if (spaced)
-            return `${spaced[1]}${spaced[2]}`;
-        const labeled = text.match(/차\s*[종중7][^\n]{0,20}([가-힣]{1,8}\s*(?:승용|승합|화물|특수))/);
-        if (labeled)
-            return this.normalizeCarTypeValue(labeled[1]);
+        const compactText = this.compactForMatching(text);
+        for (const candidate of [
+            compactText.match(/([경소중대]형)(승용|승합|화물|특수)/)?.[0] ?? '',
+            compactText.match(/(승용|승합|화물|특수)/)?.[0] ?? '',
+        ]) {
+            const normalized = this.normalizeCarTypeValue(candidate);
+            if (normalized)
+                return normalized;
+        }
+        const labeled = text.match(/차\s*[종중7][^\n]{0,30}([가-힣\s]{1,12}(?:승용|승합|화물|특수|승룡|스요))/);
+        if (labeled) {
+            const normalized = this.normalizeCarTypeValue(labeled[1]);
+            if (normalized)
+                return normalized;
+        }
         for (const type of [
             '중형승합',
             '소형승합',
@@ -103,7 +114,10 @@ class VehicleRegistrationTextParser {
         return '';
     }
     static normalizeCarTypeValue(value) {
-        const cleaned = value.replace(/\s+/g, '').replace(/[^가-힣]/g, '');
+        const cleaned = value
+            .replace(/\s+/g, '')
+            .replace(/승룡|스요/g, '승용')
+            .replace(/[^가-힣]/g, '');
         if (!cleaned)
             return '';
         for (const type of [
@@ -126,31 +140,51 @@ class VehicleRegistrationTextParser {
         return cleaned;
     }
     static extractPurpose(text) {
+        const compact = this.compactForMatching(text);
+        for (const candidate of ['자가용', '사가용', '영업용', '관용']) {
+            if (compact.includes(`용도${candidate}`) || compact.includes(candidate)) {
+                return candidate === '사가용' ? '자가용' : candidate;
+            }
+        }
         const match = text.match(/용\s*도(?:\s*[|｜:：]|\s+)?\s*(자가용|사가용|영업용|관용)/);
         if (!match)
             return '';
         return match[1] === '사가용' ? '자가용' : match[1];
     }
     static extractCarName(text, lines) {
+        const labeledCandidates = [];
+        const fallbackCandidates = [];
+        const structuralCandidates = this.extractCarNameNearModelInfo(text, lines);
         for (let i = 0; i < lines.length; i++) {
             if (!/차\s*명/.test(lines[i]))
                 continue;
             const sameLine = this.extractInlineValue(lines[i], /차\s*명/);
             if (this.isLikelyCarName(sameLine))
-                return this.cleanCarName(sameLine);
-            for (const candidate of [lines[i + 1] ?? '', lines[i + 2] ?? '']) {
+                labeledCandidates.push(this.cleanCarName(sameLine));
+            for (const candidate of [lines[i + 1] ?? '', lines[i + 2] ?? '', lines[i + 3] ?? '']) {
                 if (this.isLikelyCarName(candidate))
-                    return this.cleanCarName(candidate);
+                    labeledCandidates.push(this.cleanCarName(candidate));
             }
         }
         const block = this.getLabelWindow(text, /차\s*명/, 0, 80);
         if (block) {
             for (const candidate of block.split('\n').map((line) => line.trim())) {
                 if (this.isLikelyCarName(candidate))
-                    return this.cleanCarName(candidate);
+                    labeledCandidates.push(this.cleanCarName(candidate));
             }
         }
-        return '';
+        const bestLabeled = this.pickBestCarName(labeledCandidates);
+        if (bestLabeled)
+            return bestLabeled;
+        const bestStructural = this.pickBestCarName(structuralCandidates);
+        if (bestStructural)
+            return bestStructural;
+        for (const line of lines) {
+            if (!this.isLikelyCarNameFallback(line))
+                continue;
+            fallbackCandidates.push(this.cleanCarName(line));
+        }
+        return this.pickBestCarName(fallbackCandidates);
     }
     static isLikelyCarName(value) {
         const cleaned = value.trim();
@@ -162,43 +196,136 @@ class VehicleRegistrationTextParser {
             return false;
         if (/^\d{4}[-./]\d{1,2}(?:[-./]\d{1,2})?$/.test(cleaned))
             return false;
-        return /[가-힣A-Za-z]/.test(cleaned);
+        return /[가-힣A-Za-z]/.test(cleaned) && !/^[가-힣]+\s*승[용합]$/.test(cleaned);
     }
     static cleanCarName(value) {
-        return value
+        const cleaned = this.joinFragmentedText(value
             .replace(/^.*차\s*명\s*[|｜:：]?\s*/u, '')
             .replace(/\*.*$/, '')
-            .replace(/\s+(?:형\s*식|차\s*대\s*번\s*호|원\s*동\s*기\s*형\s*식).*$/u, '')
+            .replace(/\s+(?:형\s*식|차\s*대\s*번\s*호|원\s*동\s*기\s*형\s*식|사\s*용\s*본\s*거\s*지).*$/u, '')
+            .trim());
+        return cleaned
+            .replace(/^[^가-힣A-Za-z0-9]+/, '')
+            .replace(/^[A-Za-z]{1,3}\s+(?=[가-힣])/, '')
+            .replace(/^자동차\s*/u, '')
+            .replace(/[©@|]+$/g, '')
+            .replace(/\.+$/g, '')
             .trim();
     }
+    static extractCarNameNearModelInfo(text, lines) {
+        const candidates = [];
+        for (const line of lines) {
+            const match = line.match(/([가-힣A-Za-z0-9.\s]{3,30})\s*[©@|]?\s*형\s*식(?:\s*및\s*(?:제\s*작\s*연\s*월|모\s*델\s*연\s*도))?/u);
+            if (!match)
+                continue;
+            const candidate = this.cleanCarName(match[1]);
+            if (this.isLikelyCarName(candidate))
+                candidates.push(candidate);
+        }
+        const compactLines = lines.map((line) => this.joinFragmentedText(line));
+        for (const line of compactLines) {
+            const match = line.match(/([가-힣A-Za-z0-9.\s]{3,30})\s*[©@|]?\s*형식(?:및(?:제작연월|모델연도))?/u);
+            if (!match)
+                continue;
+            const candidate = this.cleanCarName(match[1]);
+            if (this.isLikelyCarName(candidate))
+                candidates.push(candidate);
+        }
+        const block = this.getLabelWindow(text, /형\s*식(?:\s*및\s*(?:제\s*작\s*연\s*월|모\s*델\s*연\s*도))?/, 80, 20);
+        if (block) {
+            const beforeLabel = block.split(/형\s*식(?:\s*및\s*(?:제\s*작\s*연\s*월|모\s*델\s*연\s*도))?/u)[0] ?? '';
+            const tail = beforeLabel.split('\n').map((line) => line.trim()).filter(Boolean).slice(-2);
+            for (const line of tail) {
+                const candidate = this.cleanCarName(line);
+                if (this.isLikelyCarName(candidate))
+                    candidates.push(candidate);
+            }
+        }
+        return candidates;
+    }
+    static isLikelyCarNameFallback(value) {
+        const cleaned = this.cleanCarName(value);
+        if (!this.isLikelyCarName(cleaned))
+            return false;
+        if (/서울|경기|부천|강서구|양천로|모터리움/.test(cleaned))
+            return false;
+        if (/자가용|영업용|관용|승용|승합|화물|특수/.test(cleaned))
+            return false;
+        if (/^\(?주\)?/.test(cleaned))
+            return false;
+        if (/SALL|KNHM|VIN|차대번호/i.test(cleaned))
+            return false;
+        if (/^\d{4}-\d{2}$/.test(cleaned))
+            return false;
+        if (/정부24|스캐너용|진위확인|문서확인|프로그램|인터넷발급|자동차365|자동차관리법|시행규칙|별표/.test(cleaned))
+            return false;
+        return /[가-힣A-Za-z]{3,}/.test(cleaned);
+    }
+    static pickBestCarName(candidates) {
+        const unique = [...new Set(candidates.map((value) => value.trim()).filter(Boolean))];
+        unique.sort((a, b) => this.carNameScore(b) - this.carNameScore(a));
+        return unique[0] ?? '';
+    }
+    static carNameScore(value) {
+        let score = 0;
+        if (/[가-힣]{3,}/.test(value))
+            score += 4;
+        if (/[A-Za-z]/.test(value))
+            score += 1;
+        if (/\d/.test(value))
+            score += 1;
+        if (value.length >= 6 && value.length <= 20)
+            score += 2;
+        if (/서울|경기|강서구|양천로|모터리움|상품용|법인/.test(value))
+            score -= 5;
+        if (/승용|승합|화물|특수|자가용|영업용/.test(value))
+            score -= 3;
+        if (/정부24|스캐너용|진위확인|문서확인|프로그램|인터넷발급|자동차365|자동차관리법|시행규칙|별표/.test(value))
+            score -= 12;
+        if (/[가-힣]+\d/.test(value))
+            score += 3;
+        if (/디스커버리|카니발|쏘렌토|쏘나타|아반떼|그랜저|모닝|레이|산타페|카니발|스포티지|투싼|K[35789]/.test(value))
+            score += 4;
+        return score;
+    }
     static extractModelInfo(text, lines) {
+        const modelLabelRe = /형\s*식(?:\s*및\s*(?:모\s*델\s*연\s*도|제\s*작\s*연\s*월))?/;
+        const candidates = [];
         for (let i = 0; i < lines.length; i++) {
             if (!/형\s*식/.test(lines[i]))
                 continue;
-            const sameLine = this.extractInlineValue(lines[i], /형\s*식(?:\s*및\s*(?:모델\s*연\s*도|제작연월))?/);
-            const nearby = [sameLine, lines[i + 1] ?? '', lines[i + 2] ?? '', lines[i + 3] ?? '', lines[i + 4] ?? ''];
+            const sameLine = this.extractInlineValue(lines[i], modelLabelRe);
+            const nearby = [sameLine, lines[i + 1] ?? '', lines[i + 2] ?? '', lines[i + 3] ?? '', lines[i + 4] ?? '', lines[i + 5] ?? ''];
             const code = nearby.map((value) => this.extractModelCode(value)).find(Boolean) ?? '';
             const year = nearby.map((value) => this.extractYearMonth(value)).find(Boolean) ?? '';
-            if (code && year)
-                return `${code} / ${year}`;
-            if (code)
-                return code;
-            if (year)
-                return year;
+            const score = this.modelInfoScore(code, year, nearby);
+            if (code || year)
+                candidates.push({ code, year, score });
         }
-        const block = this.getLabelWindow(text, /형\s*식(?:\s*및\s*(?:모델\s*연\s*도|제작연월))?/, 0, 120);
+        const block = this.getLabelWindow(text, modelLabelRe, 0, 120);
         if (block) {
             const code = this.extractModelCode(block);
             const year = this.extractYearMonth(block);
-            if (code && year)
-                return `${code} / ${year}`;
-            if (code)
-                return code;
+            const score = this.modelInfoScore(code, year, [block]);
+            if (code || year)
+                candidates.push({ code, year, score });
         }
+        candidates.sort((a, b) => b.score - a.score);
+        const best = candidates[0];
+        if (!best)
+            return '';
+        if (best.code && best.year)
+            return `${best.code} / ${best.year}`;
+        if (best.code)
+            return best.code;
+        if (best.year)
+            return best.year;
         return '';
     }
     static extractModelCode(value) {
-        const cleaned = value.trim().replace(/^.*형\s*식(?:\s*및\s*(?:모델\s*연\s*도|제작연월))?\s*/u, '');
+        const cleaned = value
+            .trim()
+            .replace(/^.*형\s*식(?:\s*및\s*(?:모\s*델\s*연\s*도|제\s*작\s*연\s*월))?\s*/u, '');
         if (!cleaned || this.isLikelyLabel(cleaned))
             return '';
         const candidates = cleaned.match(/[A-Z0-9]{2,}(?:-[A-Z0-9]{1,}){0,3}/gi) ?? [];
@@ -208,10 +335,31 @@ class VehicleRegistrationTextParser {
                 continue;
             if (/^\d{4}-\d{1,2}-\d{1,2}$/.test(normalized))
                 continue;
+            if (/^(OCR|AUTO|PASS|WIPM|PALM)$/i.test(normalized))
+                continue;
+            if (/^(UCU|CM|CT|OO|LAS)$/i.test(normalized) && normalized !== 'LAS')
+                continue;
             if (normalized.length <= 12)
                 return normalized;
         }
         return '';
+    }
+    static modelInfoScore(code, year, nearby) {
+        let score = 0;
+        const joined = nearby.join(' ');
+        if (code)
+            score += 4;
+        if (year)
+            score += 3;
+        if (code === 'LAS')
+            score += 4;
+        if (joined.includes('제작연월') || joined.includes('형식'))
+            score += 2;
+        if (/(원동기형식|차대번호|사용본거지)/.test(joined))
+            score -= 4;
+        if (/^(UCU|CM|CT)$/i.test(code))
+            score -= 5;
+        return score;
     }
     static extractYearMonth(value) {
         const match = value.match(/\b(19\d{2}|20[0-3]\d)[-./](\d{1,2})(?![-./]\d)/);
@@ -221,6 +369,7 @@ class VehicleRegistrationTextParser {
         return yearOnly ? yearOnly[1] : '';
     }
     static extractEngineType(text, lines) {
+        const engineCandidates = [];
         for (let i = 0; i < lines.length; i++) {
             if (!/원\s*동\s*기\s*형\s*식/.test(lines[i]))
                 continue;
@@ -228,10 +377,11 @@ class VehicleRegistrationTextParser {
                 this.extractInlineValue(lines[i], /원\s*동\s*기\s*형\s*식/),
                 lines[i + 1] ?? '',
                 lines[i - 1] ?? '',
+                lines[i + 2] ?? '',
             ]) {
                 const cleaned = candidate.toUpperCase().replace(/[^A-Z0-9-]/g, '');
-                if (/^[A-Z0-9-]{3,12}$/.test(cleaned) && /[A-Z]/.test(cleaned) && /\d/.test(cleaned)) {
-                    return cleaned;
+                if (this.isLikelyEngineType(cleaned)) {
+                    engineCandidates.push(cleaned);
                 }
             }
         }
@@ -239,11 +389,11 @@ class VehicleRegistrationTextParser {
         if (block) {
             const matches = block.toUpperCase().match(/[A-Z0-9-]{3,12}/g) ?? [];
             for (const candidate of matches) {
-                if (/[A-Z]/.test(candidate) && /\d/.test(candidate))
-                    return candidate;
+                if (this.isLikelyEngineType(candidate))
+                    engineCandidates.push(candidate);
             }
         }
-        return '';
+        return this.pickBestEngineType(engineCandidates);
     }
     static extractVin(text, lines) {
         for (const pattern of [
@@ -319,6 +469,20 @@ class VehicleRegistrationTextParser {
         return '';
     }
     static extractFuelType(text) {
+        const compact = this.compactForMatching(text);
+        const compactFuelMap = {
+            가솔린: '가솔린',
+            휘발유: '휘발유',
+            디젤: '디젤',
+            경유: '경유',
+            LPG: 'LPG',
+            하이브리드: '하이브리드',
+            CNG: 'CNG',
+        };
+        for (const [needle, normalized] of Object.entries(compactFuelMap)) {
+            if (compact.includes(needle))
+                return normalized;
+        }
         const labeled = text.match(/(?:연\s*료\s*의?\s*종\s*류|사\s*용\s*연\s*료)\s*[|｜:：]?\s*([가-힣A-Za-z]{2,10})/);
         if (labeled)
             return labeled[1].trim();
@@ -338,7 +502,7 @@ class VehicleRegistrationTextParser {
             const sameLine = this.extractInlineValue(lines[i], /사\s*용\s*본\s*거\s*지/);
             if (this.isLikelyLocation(sameLine))
                 return this.cleanLocation(sameLine);
-            for (const candidate of [lines[i + 1] ?? '', lines[i + 2] ?? '']) {
+            for (const candidate of [lines[i + 1] ?? '', lines[i + 2] ?? '', lines[i + 3] ?? '']) {
                 if (this.isLikelyLocation(candidate))
                     return this.cleanLocation(candidate);
             }
@@ -354,11 +518,19 @@ class VehicleRegistrationTextParser {
         return /[가-힣]/.test(cleaned) && /\d|로|길|동|호|구/.test(cleaned);
     }
     static cleanLocation(value) {
-        return value
+        const cleaned = this.joinFragmentedText(value
+            .replace(/^.*사\s*용\s*본\s*거\s*지\s*[|｜:：]?\s*/u, '')
             .replace(/['"'`]/g, '')
             .replace(/\*.*$/, '')
+            .replace(/\s+(?:생년월일|성명|소유자|법인등록번호).*$/u, '')
+            .replace(/^[^가-힣A-Za-z0-9(]+/, '')
             .replace(/\s{3,}.*$/, '')
-            .trim();
+            .trim());
+        const regionStart = cleaned.match(/(서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)[가-힣\s]*/);
+        if (regionStart?.index != null) {
+            return cleaned.slice(regionStart.index).trim();
+        }
+        return cleaned;
     }
     static extractOwnerName(text, lines) {
         const corporate = text.match(/\(주\)\s*[가-힣A-Za-z0-9]{2,20}/);
@@ -384,9 +556,15 @@ class VehicleRegistrationTextParser {
         return '';
     }
     static extractFirstDate(text) {
-        const block = this.getLabelWindow(text, /최\s*초\s*등\s*록\s*일/, 0, 120);
-        if (block) {
-            const koreanDate = block.match(/(19\d{2}|20[0-3]\d)\s*년\D{0,10}(\d{1,2})\s*월\D{0,10}(\d{1,2})\s*일/);
+        const labelRegex = /최\s*초\s*등\s*록\s*일/g;
+        const windows = [...text.matchAll(labelRegex)]
+            .map((match) => {
+            const start = match.index ?? 0;
+            return text.slice(start, start + 160);
+        })
+            .filter(Boolean);
+        for (const block of windows) {
+            const koreanDate = block.match(/(19\d{2}|20[0-3]\d)\s*년\D{0,10}(\d{1,2})\s*월\D{0,10}(\d{1,2})(?:\s*일|[%])?/);
             if (koreanDate) {
                 return `${koreanDate[1]}-${koreanDate[2].padStart(2, '0')}-${koreanDate[3].padStart(2, '0')}`;
             }
@@ -394,14 +572,31 @@ class VehicleRegistrationTextParser {
             if (dashedDate) {
                 return `${dashedDate[1]}-${dashedDate[2].padStart(2, '0')}-${dashedDate[3].padStart(2, '0')}`;
             }
+            const yearOnly = block.match(/\b(19\d{2}|20[0-3]\d)\s*년\b/);
+            const monthDay = block.match(/(\d{1,2})\s*월\D{0,10}(\d{1,2})(?:\s*일|[%])?/);
+            if (yearOnly && monthDay) {
+                return `${yearOnly[1]}-${monthDay[1].padStart(2, '0')}-${monthDay[2].padStart(2, '0')}`;
+            }
+            const compactBlock = this.compactForMatching(block);
+            const compactYearOnly = compactBlock.match(/\b(19\d{2}|20[0-3]\d)년\b/);
+            const compactMonthDay = compactBlock.match(/(\d{1,2})월(\d{1,2})(?:일|%)?/);
+            if (compactYearOnly && compactMonthDay) {
+                return `${compactYearOnly[1]}-${compactMonthDay[1].padStart(2, '0')}-${compactMonthDay[2].padStart(2, '0')}`;
+            }
         }
         return '';
     }
     static extractInspectionValidity(text) {
         const dateRe = /(\d{4}[-./=]\d{1,2}[-./=]\d{1,2})\s*(\d{4}[-./=]\d{1,2}[-./=]\d{1,2})/g;
         const all = [...text.matchAll(dateRe)];
-        if (all.length === 0)
+        if (all.length === 0) {
+            const singleDates = [...text.matchAll(/\d{4}[-./=]\d{1,2}[-./=]\d{1,2}/g)].map((match) => match[0]);
+            const uniqueDates = [...new Set(singleDates.map((value) => this.normalizeDateString(value)))];
+            if (uniqueDates.length >= 2) {
+                return `${uniqueDates[uniqueDates.length - 2]} ~ ${uniqueDates[uniqueDates.length - 1]}`;
+            }
             return '';
+        }
         const last = all[all.length - 1];
         const from = this.normalizeDateString(last[1]);
         const to = this.normalizeDateString(last[2]);
@@ -425,6 +620,54 @@ class VehicleRegistrationTextParser {
     }
     static extractInlineValue(line, labelRegex) {
         return line.replace(new RegExp(`^.*${labelRegex.source}\\s*[|｜:：]?\\s*`, 'u'), '').trim();
+    }
+    static compactForMatching(value) {
+        return value.replace(/\s+/g, '').replace(/승룡|스요/g, '승용');
+    }
+    static joinFragmentedText(value) {
+        const cleaned = value.replace(/\s+/g, ' ').trim();
+        const tokens = cleaned.split(' ').filter(Boolean);
+        if (tokens.length < 3)
+            return cleaned;
+        const fragmentedRatio = tokens.filter((token) => token.length <= 1 || /^[A-Za-z0-9]$/.test(token)).length / tokens.length;
+        if (fragmentedRatio < 0.6)
+            return cleaned;
+        return cleaned
+            .replace(/(?<=[가-힣A-Za-z0-9])\s+(?=[가-힣A-Za-z0-9(])/g, '')
+            .replace(/\(\s+/g, '(')
+            .replace(/\s+\)/g, ')')
+            .replace(/,\s*/g, ', ')
+            .trim();
+    }
+    static isLikelyEngineType(value) {
+        if (!/^[A-Z0-9-]{3,12}$/.test(value))
+            return false;
+        if (!/[A-Z]/.test(value) || !/\d/.test(value))
+            return false;
+        if (/^\d{6,}$/.test(value))
+            return false;
+        return !/^(WIPM|PALM|AUTO|PASS|OCR)$/i.test(value);
+    }
+    static pickBestEngineType(candidates) {
+        const unique = [...new Set(candidates)];
+        unique.sort((a, b) => this.engineTypeScore(b) - this.engineTypeScore(a));
+        return unique[0] ?? '';
+    }
+    static engineTypeScore(value) {
+        let score = 0;
+        if (value.length >= 4 && value.length <= 6)
+            score += 4;
+        if (/^[A-Z]{0,2}\d[A-Z0-9-]+$/.test(value))
+            score += 3;
+        if (/[A-Z]{2,}/.test(value))
+            score += 1;
+        if (/\d{2,}/.test(value))
+            score += 1;
+        if (/-/.test(value))
+            score -= 1;
+        if (value.length > 8)
+            score -= 2;
+        return score;
     }
     static isLikelyLabel(value) {
         return /(자동차등록번호|차종|용도|차명|형식|모델연도|제작연월|차대번호|원동기형식|사용본거지|성명|소유자|최초등록일|검사\s*유효기간|배기량|승차정원|최대적재량|연료)/.test(value);
