@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <title>자동차등록증 OCR</title>
+    <style>
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f5f5; color: #222; }
+
+      /* ── 모드 선택 ── */
+      #mode-select {
+        display: flex; flex-direction: column; align-items: center;
+        justify-content: center; gap: 24px; padding: 48px 20px;
+      }
+      #mode-select h2 { font-size: 20px; font-weight: 700; }
+      #mode-select p  { font-size: 13px; color: #888; }
+      .mode-buttons   { display: flex; gap: 16px; }
+      .mode-btn {
+        display: flex; flex-direction: column; align-items: center; gap: 10px;
+        padding: 24px 32px; border: 2px solid #e5e7eb; border-radius: 16px;
+        background: #fff; cursor: pointer; font-size: 15px; font-weight: 600; color: #333;
+        transition: border-color .15s, box-shadow .15s;
+      }
+      .mode-btn:hover { border-color: #22c55e; box-shadow: 0 2px 12px rgba(34,197,94,.15); }
+      .mode-btn svg { width: 40px; height: 40px; color: #22c55e; }
+
+      /* ── iframe ── */
+      #iframe-section { display: none; padding: 20px; }
+      #iframe-section.active { display: block; }
+      .back-btn {
+        margin-bottom: 12px; padding: 8px 16px; background: #f3f4f6;
+        border: 1px solid #ddd; border-radius: 8px; cursor: pointer;
+        font-size: 13px; color: #555;
+      }
+      .back-btn:hover { background: #e5e7eb; }
+      iframe { display: block; border: 1px solid #ddd; border-radius: 12px; width: 375px; height: 667px; }
+
+      /* ── 결과 폼 ── */
+      #form-section { display: none; padding: 20px; max-width: 560px; }
+      #form-section.active { display: block; }
+
+      .form-header {
+        display: flex; align-items: center; justify-content: space-between;
+        margin-bottom: 20px;
+      }
+      .form-header h3 { font-size: 18px; font-weight: 700; }
+      .re-ocr-btn {
+        padding: 8px 16px; background: #22c55e; color: #fff;
+        border: none; border-radius: 8px; cursor: pointer; font-size: 13px; font-weight: 600;
+      }
+      .re-ocr-btn:hover { background: #16a34a; }
+
+      .form-section-title {
+        font-size: 11px; font-weight: 700; color: #9ca3af;
+        text-transform: uppercase; letter-spacing: .08em;
+        margin: 20px 0 10px; padding-bottom: 6px; border-bottom: 1px solid #e5e7eb;
+      }
+      .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+      .form-grid .full { grid-column: 1 / -1; }
+      .field label { display: block; font-size: 11px; color: #9ca3af; margin-bottom: 4px; font-weight: 600; }
+      .field input {
+        width: 100%; padding: 10px 12px; border: 1px solid #e5e7eb;
+        border-radius: 8px; font-size: 14px; background: #fafafa; color: #111;
+      }
+      .field input:read-only { background: #f9fafb; }
+      .field input:not([readonly]) { background: #fff; border-color: #22c55e; }
+
+      .save-btn {
+        margin-top: 24px; width: 100%; padding: 14px;
+        background: #111; color: #fff; border: none; border-radius: 10px;
+        font-size: 16px; font-weight: 700; cursor: pointer;
+      }
+      .save-btn:hover { background: #333; }
+
+      .ocr-badge {
+        display: inline-flex; align-items: center; gap: 4px;
+        font-size: 11px; padding: 3px 8px; background: #dcfce7;
+        color: #16a34a; border-radius: 99px; font-weight: 600;
+      }
+    </style>
+  </head>
+  <body>
+
+    <!-- 1단계: 모드 선택 -->
+    <div id="mode-select">
+      <h2>자동차등록증 OCR 입력</h2>
+      <p>입력 방식을 선택하세요</p>
+      <div class="mode-buttons">
+        <button class="mode-btn" onclick="openOcr('camera')">
+          <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
+            <path stroke-linecap="round" stroke-linejoin="round"
+              d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+            <path stroke-linecap="round" stroke-linejoin="round" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+          </svg>
+          촬영하기
+        </button>
+        <button class="mode-btn" onclick="openOcr('upload')">
+          <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
+            <path stroke-linecap="round" stroke-linejoin="round"
+              d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+          </svg>
+          첨부하기
+        </button>
+      </div>
+    </div>
+
+    <!-- 2단계: iframe -->
+    <div id="iframe-section">
+      <button class="back-btn" onclick="goBack()">← 돌아가기</button>
+      <iframe id="ocr-frame" allow="camera" src=""></iframe>
+    </div>
+
+    <!-- 3단계: 결과 폼 -->
+    <div id="form-section">
+      <div class="form-header">
+        <h3>자동차등록증 정보 <span class="ocr-badge">✓ OCR 자동입력</span></h3>
+        <button class="re-ocr-btn" onclick="reOcr()">다시 스캔</button>
+      </div>
+
+      <p class="form-section-title">차량 기본 정보</p>
+      <div class="form-grid">
+        <div class="field full">
+          <label>자동차등록번호 (차량번호)</label>
+          <input id="f-carNumber" type="text" placeholder="-" />
+        </div>
+        <div class="field">
+          <label>차종</label>
+          <input id="f-carType" type="text" placeholder="-" />
+        </div>
+        <div class="field">
+          <label>용도</label>
+          <input id="f-purpose" type="text" placeholder="-" />
+        </div>
+        <div class="field full">
+          <label>차명</label>
+          <input id="f-carName" type="text" placeholder="-" />
+        </div>
+        <div class="field full">
+          <label>형식 및 모델연도 (제작연월)</label>
+          <input id="f-modelInfo" type="text" placeholder="-" />
+        </div>
+        <div class="field full">
+          <label>차대번호 (VIN)</label>
+          <input id="f-vin" type="text" placeholder="-" />
+        </div>
+      </div>
+
+      <p class="form-section-title">엔진 / 제원</p>
+      <div class="form-grid">
+        <div class="field">
+          <label>원동기형식</label>
+          <input id="f-engineType" type="text" placeholder="-" />
+        </div>
+        <div class="field">
+          <label>배기량 (cc)</label>
+          <input id="f-displacement" type="text" placeholder="-" />
+        </div>
+        <div class="field">
+          <label>승차정원 (명)</label>
+          <input id="f-passengerCapacity" type="text" placeholder="-" />
+        </div>
+        <div class="field">
+          <label>최대적재량 (kg)</label>
+          <input id="f-maxLoadCapacity" type="text" placeholder="-" />
+        </div>
+        <div class="field">
+          <label>연료</label>
+          <input id="f-fuelType" type="text" placeholder="-" />
+        </div>
+        <div class="field">
+          <label>최초등록일</label>
+          <input id="f-firstRegistrationDate" type="text" placeholder="-" />
+        </div>
+        <div class="field full">
+          <label>검사유효기간</label>
+          <input id="f-inspectionValidity" type="text" placeholder="-" />
+        </div>
+      </div>
+
+      <p class="form-section-title">소유자 정보</p>
+      <div class="form-grid">
+        <div class="field full">
+          <label>소유자 성명(명칭)</label>
+          <input id="f-ownerName" type="text" placeholder="-" />
+        </div>
+        <div class="field full">
+          <label>사용본거지</label>
+          <input id="f-location" type="text" placeholder="-" />
+        </div>
+      </div>
+
+      <button class="save-btn" onclick="onSave()">확인 후 저장</button>
+    </div>
+
+    <script>
+      const OCR_ORIGIN = 'http://localhost:3339'
+
+      // postMessage 수신
+      window.addEventListener('message', (event) => {
+        if (event.origin !== OCR_ORIGIN) return
+
+        const { type, receiptId, payload } = event.data
+
+        if (type === 'VEHICLE_REGISTRATION_OCR_COMPLETED' && payload) {
+          fillForm(payload)
+          document.getElementById('iframe-section').classList.remove('active')
+          document.getElementById('form-section').classList.add('active')
+          document.getElementById('mode-select').style.display = 'none'
+          console.log('[Parent] OCR 완료:', receiptId, payload)
+        }
+
+        if (type === 'VEHICLE_REGISTRATION_OCR_FAILED') {
+          alert('OCR 분석에 실패했습니다. 다시 시도해 주세요.')
+        }
+      })
+
+      function fillForm(p) {
+        const map = {
+          'f-carNumber':             p.carNumber             ?? '',
+          'f-carType':               p.carType               ?? '',
+          'f-purpose':               p.purpose               ?? '',
+          'f-carName':               p.carName               ?? '',
+          'f-modelInfo':             p.modelInfo             ?? '',
+          'f-vin':                   p.vin                   ?? '',
+          'f-engineType':            p.engineType            ?? '',
+          'f-displacement':          p.displacement          ?? '',
+          'f-passengerCapacity':     p.passengerCapacity     ?? '',
+          'f-maxLoadCapacity':       p.maxLoadCapacity       ?? '',
+          'f-fuelType':              p.fuelType              ?? '',
+          'f-location':              p.location              ?? '',
+          'f-ownerName':             p.ownerName             ?? '',
+          'f-firstRegistrationDate': p.firstRegistrationDate ?? '',
+          'f-inspectionValidity':    p.inspectionValidity    ?? '',
+        }
+        Object.entries(map).forEach(([id, val]) => {
+          const el = document.getElementById(id)
+          if (el) { el.value = val; el.removeAttribute('readonly') }
+        })
+      }
+
+      function openOcr(mode) {
+        document.getElementById('ocr-frame').src = `${OCR_ORIGIN}?mode=${mode}`
+        document.getElementById('mode-select').style.display = 'none'
+        document.getElementById('iframe-section').classList.add('active')
+        document.getElementById('form-section').classList.remove('active')
+      }
+
+      function goBack() {
+        document.getElementById('ocr-frame').src = ''
+        document.getElementById('mode-select').style.display = ''
+        document.getElementById('iframe-section').classList.remove('active')
+        document.getElementById('form-section').classList.remove('active')
+      }
+
+      function reOcr() {
+        document.getElementById('mode-select').style.display = ''
+        document.getElementById('form-section').classList.remove('active')
+      }
+
+      function onSave() {
+        const data = {}
+        ;['carNumber','carType','purpose','carName','modelInfo','vin',
+          'engineType','displacement','passengerCapacity','maxLoadCapacity',
+          'fuelType','location','ownerName','firstRegistrationDate','inspectionValidity'].forEach(k => {
+          data[k] = document.getElementById('f-' + k)?.value ?? ''
+        })
+        console.log('[Parent] 저장 데이터:', data)
+        // TODO: 기존 웹 API 호출 → fetch('/api/vehicles', { method: 'POST', body: JSON.stringify(data) })
+        alert('저장되었습니다.\n(콘솔에서 데이터 확인)')
+      }
+    </script>
+  </body>
+</html>
